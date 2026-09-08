@@ -1,1 +1,105 @@
+optimizer.init(params) creates the optimizer state, such as Adam's momentum buffers, and optimizer.update(grads, opt_state, params) converts gradients into updates and returns the next optimizer state. Then optax.apply_updates(params, updates) returns the next parameter tree.
+optimizer = optax.adamw(learning_rate=LEARNING_RATE, weight_decay=1e-4)
+opt_state = optimizer.init(params)
 
+@jax.jit
+def train_step(params, opt_state, batch):
+    (loss, metrics), grads = jax.value_and_grad(loss_with_metrics, has_aux=True)(params, batch)
+    updates, opt_state = optimizer.update(grads, opt_state, params)
+    params = optax.apply_updates(params, updates)
+    metrics = {
+        "loss": loss,
+        "accuracy": metrics["accuracy"],
+        "grad_norm": optax.global_norm(grads),
+    }
+    return params, opt_state, metrics
+
+
+params_opt = init_mlp_params(jax.random.key(2))
+params_opt = jax.device_put(params_opt, device)
+opt_state = optimizer.init(params_opt)
+
+params_opt, opt_state, metrics = train_step(params_opt, opt_state, first_batch)
+params_opt, opt_state, metrics = block_tree((params_opt, opt_state, metrics))
+
+show_table(
+    ["Metric", "Value"],
+    [
+        ("loss", f"{float(metrics['loss']):.4f}"),
+        ("accuracy", f"{100 * float(metrics['accuracy']):.1f}%"),
+        ("gradient L2 norm", f"{float(metrics['grad_norm']):.4f}"),
+    ],
+    title="One compiled Optax training step",
+    aligns=["left", "right"],
+)
+
+---
+
+Pulling a loss to Python every iteration is convenient, but it also synchronizes the host with the GPU every iteration.
+
+def train_many_steps(params, opt_state, steps=400, log_every=25):
+    """Run a sized training loop, log a metric snapshot every `log_every` steps, and return history plus final state."""
+    history = []
+    start = time.perf_counter()
+    metrics = None
+
+    for step in range(steps):
+        params, opt_state, metrics = train_step(params, opt_state, batch_at(step))
+
+        if step % log_every == 0 or step == steps - 1:
+            metrics = block_tree(metrics)
+            history.append(
+                {
+                    "step": step,
+                    "loss": float(metrics["loss"]),
+                    "accuracy": float(metrics["accuracy"]),
+                    "grad_norm": float(metrics["grad_norm"]),
+                }
+            )
+
+    params, opt_state, metrics = block_tree((params, opt_state, metrics))
+    elapsed = time.perf_counter() - start
+    return params, opt_state, history, elapsed, metrics
+
+
+params_train = init_mlp_params(jax.random.key(3))
+params_train = jax.device_put(params_train, device)
+# Fresh optimizer state, paired with this fresh `params_train`.
+opt_state = optimizer.init(params_train)
+
+params_train, opt_state, _ = train_step(params_train, opt_state, first_batch)
+block_tree((params_train, opt_state))
+
+TRAIN_STEPS = 400
+params_train, opt_state, history, elapsed, final_metrics = train_many_steps(
+    params_train, opt_state, steps=TRAIN_STEPS, log_every=25
+)
+examples_per_sec = TRAIN_STEPS * BATCH_SIZE / elapsed
+
+show_table(
+    ["Step", "Loss", "Accuracy", "Grad norm"],
+    [(h["step"], f"{h['loss']:.4f}", f"{100*h['accuracy']:.1f}%", f"{h['grad_norm']:.3f}") for h in history],
+    title=f"Training metrics, {examples_per_sec:,.0f} examples/sec",
+    aligns=["right", "right", "right", "right"],
+)
+
+steps = [h["step"] for h in history]
+losses = [h["loss"] for h in history]
+accuracies = [h["accuracy"] for h in history]
+
+fig, ax1 = plt.subplots(figsize=(8, 4))
+ax1.plot(steps, losses, marker="o", color="#0969da", label="loss")
+ax1.set_xlabel("step")
+ax1.set_ylabel("loss", color="#0969da")
+ax1.tick_params(axis="y", labelcolor="#0969da")
+ax1.grid(True, alpha=0.25)
+
+ax2 = ax1.twinx()
+ax2.plot(steps, accuracies, marker="s", color="#1a7f37", label="accuracy")
+ax2.set_ylabel("batch accuracy", color="#1a7f37")
+ax2.tick_params(axis="y", labelcolor="#1a7f37")
+ax2.set_ylim(0.0, 1.0)
+
+fig.suptitle("Fashion-MNIST training curve")
+fig.tight_layout()
+plt.show()
