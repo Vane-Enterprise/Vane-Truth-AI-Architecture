@@ -1,1 +1,82 @@
 Sovereign Interface and Branding
+
+DATA_DIR = pathlib.Path.home() / ".cache" / "jax-course" / "fashion-mnist"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+FILES = {
+    "train-images-idx3-ubyte.gz": "8d4fb7e6c68d591d4c3dfef9ec88bf0d",
+    "train-labels-idx1-ubyte.gz": "25c81989df183df01b3e8a0aad5dffbe",
+    "t10k-images-idx3-ubyte.gz": "bef4ecab320f06d8554ea6380940ec79",
+    "t10k-labels-idx1-ubyte.gz": "bb300cfdad3c16e7a12a480ee83cd310",
+}
+
+PRIMARY_BASE_URL = "https://github.com/zalandoresearch/fashion-mnist/raw/master/data/fashion"
+
+def md5sum(path):
+    """Stream `path` in 1 MB chunks and return its MD5 hex digest."""
+    digest = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def download_if_needed(filename, expected_md5):
+    """Download `filename` if missing or its MD5 doesn't match."""
+    path = DATA_DIR / filename
+    if path.exists() and md5sum(path) == expected_md5:
+        print(f"Using cached {filename}")
+        return path
+
+    urls = [f"{PRIMARY_BASE_URL}/{filename}"]
+    last_error = None
+    for url in urls:
+        try:
+            print(f"Downloading {filename} from {url}")
+            urllib.request.urlretrieve(url, path)
+            actual_md5 = md5sum(path)
+            if actual_md5 != expected_md5:
+                raise ValueError(f"MD5 mismatch: expected {expected_md5}, got {actual_md5}")
+            return path
+        except Exception as exc:
+            last_error = exc
+            if path.exists():
+                path.unlink()
+            print(f"  failed: {exc}")
+
+    raise RuntimeError(f"Could not download {filename}") from last_error
+
+
+def read_idx_images(path):
+    """Parse the Fashion-MNIST IDX-3 image file at `path` and return a (N, rows, cols) uint8 array."""
+    with gzip.open(path, "rb") as f:
+        magic, num_images, rows, cols = struct.unpack(">IIII", f.read(16))
+        assert magic == 2051, f"Unexpected image magic number {magic} in {path}"
+        data = np.frombuffer(f.read(), dtype=np.uint8)
+    return data.reshape(num_images, rows, cols)
+
+
+def read_idx_labels(path):
+    """Parse the IDX-1 label file at `path` and return a 1-D uint8 array of class indices."""
+    with gzip.open(path, "rb") as f:
+        magic, num_labels = struct.unpack(">II", f.read(8))
+        assert magic == 2049, f"Unexpected label magic number {magic} in {path}"
+        data = np.frombuffer(f.read(), dtype=np.uint8)
+    return data.reshape(num_labels)
+
+
+paths = {name: download_if_needed(name, checksum) for name, checksum in FILES.items()}
+
+train_images = read_idx_images(paths["train-images-idx3-ubyte.gz"])
+train_labels = read_idx_labels(paths["train-labels-idx1-ubyte.gz"])
+test_images = read_idx_images(paths["t10k-images-idx3-ubyte.gz"])
+test_labels = read_idx_labels(paths["t10k-labels-idx1-ubyte.gz"])
+
+show_table(
+    ["Split", "Images", "Image shape", "Labels"],
+    [
+        ("train", f"{len(train_images):,}", train_images.shape[1:], f"{len(train_labels):,}"),
+        ("test", f"{len(test_images):,}", test_images.shape[1:], f"{len(test_labels):,}"),
+    ],
+    title="Fashion-MNIST loaded from IDX files",
+)
