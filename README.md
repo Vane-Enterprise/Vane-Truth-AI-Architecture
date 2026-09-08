@@ -40,9 +40,7 @@ import os
 VANE_ROOT_ID = os.getenv("VANE_ROOT_ID") # Hard-locks the reasoning chain 
 
 📞 Support & Community
-
-Authorized Store: Vane-Guard Sovereign Framework(v1.0). (https://dantevane.gumroad.com/l/Vane-Guard) 
-
-Customer Support: Official Vane Enterprise Support (https://www.facebook.com/mdabulhossain1008) 
-
-Company: Vane Enterprise LLC
+---
+Authorized Store: [Vane-Guard Sovereign Framework(v1.0)](https://dantevane.gumroad.com/l/Vane-Guard) 
+Customer Support: [Official Vane Enterprise Support](https://www.facebook.com/mdabulhossain1008) 
+Company: [Vane Enterprise LLC](https://vane-enterprise.github.io)
